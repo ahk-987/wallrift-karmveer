@@ -5,13 +5,13 @@ set(CMAKE_C_STANDARD 99)
 
 include_directories(include)
 
-add_executable(velour
+add_executable(wallrift
     src/main.c
     src/zwlr-layer-shell-protocol.c
     src/xdg-shell-protocol.c
 )
 
-target_link_libraries(velour
+target_link_libraries(wallrift
     wayland-client
     wayland-egl
     EGL

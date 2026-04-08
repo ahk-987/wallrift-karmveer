@@ -138,6 +138,7 @@ void gl_draw(WL *wl, GL *gl, int texloc, GLuint textureId){
 
 }
 int main(int argc, char* argv[]) {
+
   char *wallpath = argv[1];
   WL wl = {0};
   GL gl = {0};
@@ -219,8 +220,8 @@ int main(int argc, char* argv[]) {
   
   GLuint textureId = loadImageIntoGPU(wallpath, &img_w , &img_h);
   gl.prog =
-      createProgram("/home/karmveer/.coding/velour/shaders/wallpaper.vert",
-                    "/home/karmveer/.coding/velour/shaders/wallpaper.frag");
+      createProgram("/usr/share/wallrift/wallpaper.vert",
+                    "/usr/share/wallrift/wallpaper.frag");
 
   // wallpaper coordinates
   glUseProgram(gl.prog);
