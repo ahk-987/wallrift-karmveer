@@ -38,10 +38,7 @@ Wallrift consists of two components:
 ## Installation
 
 ```bash
-git clone https://github.com/saber-88/wallrift.git
-cd wallrift
-chmod +x setup.sh
-./setup.sh
+yay -S wallrift-git
 ```
 ---
 ## 🚀 Usage

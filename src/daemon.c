@@ -67,7 +67,13 @@ char *readFile(const char *path) {
   rewind(f);
 
   char *data = malloc(size + 1);
-  fread(data, 1, size, f);
+  size_t read_bytes = fread(data, 1, size, f);
+  if (read_bytes != size) {
+    printf("Error: failed to read file completely\n");
+    free(data);
+    fclose(f);
+    return NULL;
+  }
   data[size] = '\0';
 
   fclose(f);
