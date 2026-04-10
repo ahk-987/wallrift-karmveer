@@ -5,6 +5,7 @@
 #include "../include/gl.h"
 #include "../include/wayland.h"
 
+#include <bits/time.h>
 #include <fcntl.h>
 #include <EGL/egl.h>
 #include <EGL/eglplatform.h>
@@ -21,11 +22,19 @@
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 #include <wayland-egl.h>
+#include <time.h>
+
 
 #define SOCK_PATH "/tmp/wallrift.sock"
 #define STB_IMAGE_IMPLEMENTATION
 #include "../include/stb_image.h"
 
+
+double get_time(){
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return  ts.tv_sec + ts.tv_nsec * 1e-9;
+}
 
 const char* get_cache_file(){
   const char* xdg = getenv("XDG_CACHE_HOME");
@@ -86,7 +95,7 @@ GLuint loadImageIntoGPU(char *imgPath, int *imageWidth, int* imageHeight, GLuint
   int channels;
   unsigned char *pixels = stbi_load(expanded, imageWidth, imageHeight, &channels, 4);
   if (!pixels) {
-    printf("\nCannot load image\n");
+    printf("\n[ERR][STB]: Cannot load image\n");
     return texID;
   }
 
@@ -100,15 +109,15 @@ GLuint loadImageIntoGPU(char *imgPath, int *imageWidth, int* imageHeight, GLuint
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
   stbi_image_free(pixels);
-  printf("\nImage loaded in GPU\n");
-  printf("\nImg width = %d\nImg height = %d\n", *imageWidth, *imageHeight);
+  printf("[INFO]: Image loaded in GPU\n");
+  printf("[INFO]: Img width = %d\n[INFO]: Img height = %d\n\n", *imageWidth, *imageHeight);
   return texID;
 }
 
 char *readFile(const char *path) {
   FILE *f = fopen(path, "rb");
   if (!f) {
-    printf("Failed to open file\n");
+    printf("[ERR][FILE]: Failed to open file\n");
     return NULL;
   }
   fseek(f, 0, SEEK_END);
@@ -118,7 +127,7 @@ char *readFile(const char *path) {
   char *data = malloc(size + 1);
   size_t read_bytes = fread(data, 1, size, f);
   if (read_bytes != size) {
-    printf("Error: failed to read file completely\n");
+    printf("[ERR][FILE]: failed to read file completely\n");
     free(data);
     fclose(f);
     return NULL;
@@ -138,7 +147,7 @@ GLuint createShader(GLenum type, const char *shaderSrc) {
   glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
   if (!success) {
     glGetShaderInfoLog(shader, 512, NULL, infoLog);
-    printf("[ERR][shader]:%s\n", infoLog);
+    printf("[ERR][shader]: %s\n", infoLog);
   }
   return shader;
 }
@@ -161,14 +170,17 @@ GLuint createProgram(const char *vFilePath, const char *fFilePath) {
   glGetProgramiv(prog, GL_LINK_STATUS, &success);
   if (!success) {
     glGetProgramInfoLog(prog, 512, NULL, infoLog);
-    printf("[ERR][linking]:%s\n", infoLog);
+    printf("[ERR][linking] :%s\n", infoLog);
   }
   glDeleteShader(vs);
   glDeleteShader(fs);
   return prog;
 }
 
-// wallpaper coordinates
+/* wallpaper coordinates x , y , z , w
+ * x , y are display cooridantes with (0,0) as centre.
+ * z , w are image coordinates with (0,0)  as bottom left.
+*/
 float vertices[] = {
     -1.0f, -1.0f, 0.0f, 1.0f,
     1.0f, -1.0f, 1.0f, 1.0f,
@@ -176,14 +188,17 @@ float vertices[] = {
     -1.0f, 1.0f, 0.0f, 0.0f,
 };
 
+// these are the indices to draw vertices in the given order
 unsigned int indices[] = { 0, 1, 2, 2, 3, 0 };
 
+// speed factor is inversely proportional to smoothness of parallax / panning movement
 float speed = 0.03f;
 
+// wallpaper width and height
 int img_w , img_h;
 
 void gl_draw(WL *wl, GL *gl, int texloc, GLuint textureId){
-
+    
     glViewport(0, 0, wl->width, wl->height);
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(gl->prog);
@@ -219,6 +234,7 @@ int main() {
 
   WL wl = {0};
   GL gl = {0};
+  wl.cursor_x = 0.05f; // initialize it at centre 
   wl.display = wl_display_connect(NULL);
   wl.registry = wl_display_get_registry(wl.display);
   wl_registry_add_listener(wl.registry, &registry_listener, &wl);
@@ -242,6 +258,8 @@ int main() {
                                    ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
 
   zwlr_layer_surface_v1_set_size(wl.layer_surface, 0, 0);
+  // trying to bypass all the exclusive zones
+  zwlr_layer_surface_v1_set_exclusive_zone(wl.layer_surface, -1);
 
   // adding layer shell surface listener to layer shell surface
   zwlr_layer_surface_v1_add_listener(wl.layer_surface, &layer_listener, &wl);
@@ -253,24 +271,26 @@ int main() {
     wl_display_dispatch(wl.display);
   }
 
-  printf("\n%s %d\n", "Display Width = ", wl.width);
-  printf("%s %d\n", "Display Height = ", wl.height);
+  printf("\n\n%s %d\n", "[INFO]: Display Width = ", wl.width);
+  printf("%s %d\n\n", "[INFO]: Display Height = ", wl.height);
 
   // egl stuff
-
-  wl.egl_window = wl_egl_window_create(
-      wl.surface, wl.width, wl.height); // encapsulate wl_surface in egl_surface
-  wl.egl_display =
-      eglGetDisplay((EGLNativeDisplayType)wl.display); // connect egl to wayland
+  wl.egl_window = wl_egl_window_create(wl.surface, wl.width, wl.height); // encapsulate wl_surface in egl_surface
+  wl.egl_display = eglGetDisplay((EGLNativeDisplayType)wl.display); // connect egl to wayland
   eglInitialize(wl.egl_display, NULL, NULL);
 
-  EGLint attributes[] = {EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_RENDERABLE_TYPE,
-                         EGL_OPENGL_ES2_BIT, EGL_NONE};
+  EGLint attributes[] = {
+                          EGL_SURFACE_TYPE,
+                          EGL_WINDOW_BIT,
+                          EGL_RENDERABLE_TYPE,
+                          EGL_OPENGL_ES2_BIT,
+                          EGL_NONE
+                        };
 
   EGLConfig config;
   EGLint num_configs;
   if (!eglChooseConfig(wl.egl_display, attributes, &config, 1, &num_configs)) {
-    printf("\nERR: Cant get egl config\n");
+    printf("\n[ERR][EGL]: Cant get egl config\n");
   }
 
   // this will allocate gpu framebuffers, egl_surface is where the gpu will
@@ -285,14 +305,10 @@ int main() {
   wl.egl_context =
       eglCreateContext(wl.egl_display, config, EGL_NO_CONTEXT, ctxAttribs);
 
-  if (!eglMakeCurrent(wl.egl_display, wl.egl_surface, wl.egl_surface,
-                      wl.egl_context)) {
-    printf("\neglMakeCurrent failed\n");
+  if (!eglMakeCurrent(wl.egl_display, wl.egl_surface, wl.egl_surface, wl.egl_context)) {
+    printf("\n[ERR][EGL]: eglMakeCurrent failed\n");
   }
-
- 
-
-
+  
   // GLSL stuff
   
   GLuint textureId = 0;
@@ -311,6 +327,7 @@ int main() {
   gl.imgHLoc = glGetUniformLocation(gl.prog, "u_img_height");
   gl.viewWLoc = glGetUniformLocation(gl.prog, "u_view_width");
   gl.viewHLoc = glGetUniformLocation(gl.prog, "u_view_height");
+
   // unix socket
   int daemon_sock = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -320,14 +337,14 @@ int main() {
   unlink(SOCK_PATH);
 
   if (bind(daemon_sock, (struct sockaddr*)&d_addr, sizeof(d_addr)) == -1) {
-    perror("Failed to bind socket!");
+    perror("[ERR][SOCK]: Failed to bind socket!");
     close(daemon_sock);
     return 1;
   }
 
-  printf("Socket created\n");
+  printf("[INFO]: Socket created\n");
   listen(daemon_sock, 5);
-  printf("Listening...\n");
+  printf("[INFO]: Listening...\n\n");
   int flags = fcntl(daemon_sock, F_GETFL, 0);
   fcntl(daemon_sock, F_SETFL, flags | O_NONBLOCK);
 
