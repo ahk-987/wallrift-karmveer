@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
+#include <wayland-cursor.h>
 #include <wayland-egl.h>
 #include <time.h>
 
@@ -147,7 +148,8 @@ GLuint createShader(GLenum type, const char *shaderSrc) {
   glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
   if (!success) {
     glGetShaderInfoLog(shader, 512, NULL, infoLog);
-    printf("[ERR][shader]: %s\n", infoLog);
+    printf("[ERR][SHADER]: %s\n", infoLog);
+    return -1;
   }
   return shader;
 }
@@ -155,8 +157,17 @@ GLuint createShader(GLenum type, const char *shaderSrc) {
 GLuint createProgram(const char *vFilePath, const char *fFilePath) {
   const char *vsrc = readFile(vFilePath);
   const char *fsrc = readFile(fFilePath);
+  if (!vsrc || !fsrc) {
+    printf("[ERR][FILE]: %s\n", "Failed to open shader file.");
+    return -1;
+  }
   GLuint vs = createShader(GL_VERTEX_SHADER, vsrc);
   GLuint fs = createShader(GL_FRAGMENT_SHADER, fsrc);
+
+  if (vs == -1 || fs == -1) {
+    printf("[ERR][SHADER]: %s\n", "Failed to create shader.");
+    return -1;
+  }
   GLuint prog = glCreateProgram();
   glAttachShader(prog, vs);
   glAttachShader(prog, fs);
@@ -170,7 +181,7 @@ GLuint createProgram(const char *vFilePath, const char *fFilePath) {
   glGetProgramiv(prog, GL_LINK_STATUS, &success);
   if (!success) {
     glGetProgramInfoLog(prog, 512, NULL, infoLog);
-    printf("[ERR][linking] :%s\n", infoLog);
+    printf("[ERR][LINKING] :%s\n", infoLog);
   }
   glDeleteShader(vs);
   glDeleteShader(fs);
@@ -240,6 +251,30 @@ int main() {
   wl_registry_add_listener(wl.registry, &registry_listener, &wl);
   wl_display_roundtrip(wl.display);
 
+  // cursor stuff
+  if (wl.shm) {
+    
+    /* supports X_CURSOR only cause hyprcursor uses
+     * different format for cursor and does not have API
+     * to work with.
+     */
+    char* theme = getenv("XCURSOR_THEME");
+    char* cursor_size = getenv("XCURSOR_SIZE");
+    
+    int size = cursor_size ? atoi(cursor_size) : 24;
+
+    wl.cursor_theme = wl_cursor_theme_load(theme,size, wl.shm);
+    if (wl.cursor_theme) {
+      wl.cursor = wl_cursor_theme_get_cursor(wl.cursor_theme, "default");
+    }
+    if (!wl.cursor) {
+      wl.cursor = wl_cursor_theme_get_cursor(wl.cursor_theme, "left_ptr");
+    }
+    if (wl.cursor) {
+      wl.cursor_surface = wl_compositor_create_surface(wl.compositor);
+    }
+  }
+
   // getting surfaces and mouse pointer
   wl.surface = wl_compositor_create_surface(wl.compositor);
   wl.pointer = wl_seat_get_pointer(wl.seat);
@@ -293,8 +328,9 @@ int main() {
     printf("\n[ERR][EGL]: Cant get egl config\n");
   }
 
-  // this will allocate gpu framebuffers, egl_surface is where the gpu will
-  // render
+  /* this will allocate gpu framebuffers,
+   * egl_surface is where the gpu will render
+  */
   wl.egl_surface = eglCreateWindowSurface(
       wl.egl_display, config, (EGLNativeWindowType)wl.egl_window, NULL);
 
@@ -318,9 +354,15 @@ int main() {
      textureId = loadImageIntoGPU(wallpath, &img_w , &img_h, textureId);
      cache_wallpaper(wallpath);
   }
-  gl.prog =
+
+  if ((gl.prog =
       createProgram("/usr/share/wallrift/shaders/wallpaper.vert",
-                    "/usr/share/wallrift/shaders/wallpaper.frag");
+                    "/usr/share/wallrift/shaders/wallpaper.frag")) == -1) {
+    
+    printf("\n[ERR][GL]: Failed to create program.\n");
+    return 1;
+  }
+  
 
   gl.cursorLoc = glGetUniformLocation(gl.prog, "u_cursor");
   gl.imgWLoc = glGetUniformLocation(gl.prog, "u_img_width");

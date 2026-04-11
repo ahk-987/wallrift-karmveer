@@ -14,6 +14,7 @@ add_executable(wallrift-daemon
 target_link_libraries(wallrift-daemon
     wayland-client
     wayland-egl
+    wayland-cursor
     EGL
     GLESv2
     m

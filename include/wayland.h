@@ -11,6 +11,7 @@
 #include <wayland-egl.h>
 #include <string.h>
 #include <wayland-util.h>
+#include <wayland-cursor.h>
 
 typedef struct {
 
@@ -22,16 +23,20 @@ typedef struct {
   struct zwlr_layer_surface_v1 *layer_surface;
   struct wl_seat *seat;
   struct wl_pointer *pointer;
-  double mouse_x;
-  double target_cursor;
-  double cursor_x;
-
+  struct wl_cursor *cursor;
+  struct wl_cursor_theme *cursor_theme;
+  struct wl_surface *cursor_surface;
+  struct wl_shm* shm;
   struct wl_egl_window *egl_window;
 
   EGLDisplay egl_display;
   EGLContext egl_context;
   EGLSurface egl_surface;
+
+  double target_cursor;
+  double cursor_x;
   int configured, width, height;
+
 } WL;
 
 static void registry_handler(void *data, struct wl_registry *registry,
@@ -48,6 +53,10 @@ static void registry_handler(void *data, struct wl_registry *registry,
   else if (!strcmp(interface, "wl_seat")) {
     wl->seat = wl_registry_bind(registry, id, &wl_seat_interface, 1);
   }
+  else if (!strcmp(interface, "wl_shm")) {
+    wl->shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
+  }
+
 }
 
 static void registry_remove(void *data, struct wl_registry *registry,
@@ -79,16 +88,27 @@ static const struct zwlr_layer_surface_v1_listener layer_listener= {
 // pointer stuff
 static void pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time, wl_fixed_t sx, wl_fixed_t sy){
   WL *wl = (WL*)data;
-  wl->mouse_x = wl_fixed_to_double(sx);
+  wl->target_cursor = wl_fixed_to_double(sx);
 
-  float normalized = wl->mouse_x / wl->width;
+  float normalized = wl->target_cursor / wl->width;
   if (normalized < 0.0f) normalized = 0.0f;
   if (normalized > 1.0f) normalized = 1.0f;
   wl->target_cursor = normalized;
 }
 static void pointer_enter(void *data, struct wl_pointer *pointer,
                           uint32_t serial, struct wl_surface *surface,
-                          wl_fixed_t sx, wl_fixed_t sy) {}
+                          wl_fixed_t sx, wl_fixed_t sy) {
+
+  WL *wl = (WL *)data;
+  if (wl->cursor && wl->cursor_surface) {
+    struct wl_cursor_image *image = wl->cursor->images[0];
+    wl_pointer_set_cursor(pointer, serial, wl->cursor_surface, image->hotspot_x, image->hotspot_y);
+    wl_surface_attach(wl->cursor_surface, wl_cursor_image_get_buffer(image), 0, 0);
+    wl_surface_damage(wl->cursor_surface, 0, 0, image->width, image->height);
+    wl_surface_commit(wl->cursor_surface);
+
+  }
+}
 
 static void pointer_leave(void *data, struct wl_pointer *pointer,
                           uint32_t serial, struct wl_surface *surface) {}

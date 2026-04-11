@@ -21,10 +21,8 @@ void main(){
   if (u_img_width > u_view_width || u_img_height > u_view_height) {
 
     if (imageAspect > screenAspect) {
-      // image wider → crop X
       scaleX = screenAspect / imageAspect;
     } else {
-      // image taller → crop Y
       scaleY = imageAspect / screenAspect;
     }
   }
