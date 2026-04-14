@@ -1,4 +1,5 @@
 #include "../include/file.h"
+#include <stdio.h>
 
 char *readFile(const char *path) {
   FILE *f = fopen(path, "rb");

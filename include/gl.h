@@ -5,7 +5,7 @@
 #include "wayland.h"
 #include "file.h"
 
-typedef struct{
+typedef struct GL{
   GLuint prog;
   GLuint vbo;
   GLuint vao;

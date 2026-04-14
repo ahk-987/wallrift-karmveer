@@ -24,10 +24,11 @@
 #include <wayland-egl.h>
 #include <time.h>
 
-#include "../include/gl.h"
 #include "../include/wayland.h"
+#include "../include/gl.h"
 #include "../include/file.h"
 
+#include "../include/app.h"
 
 #define SOCK_PATH "/tmp/wallrift.sock"
 
@@ -76,12 +77,18 @@ int main() {
 
   WL wl = {0};
   GL gl = {0};
+  
+  APP app = {
+    .wl = &wl,
+    .gl = &gl
+  };
+
   gl.speed = 0.05f;
   gl.img_w = 0;
   gl.img_h = 0;
   setupWayland(&wl);
   setupCursor(&wl);
-  setupSurface(&wl);
+  setupSurface(&app);
   setupEGL(&wl);
   
   // openGL stuff
@@ -97,7 +104,8 @@ int main() {
   if (setupOpenGL(&wl, &gl)) {
     return 1;
   }
-
+  
+  gl_draw(&wl, &gl);
   // unix socket
   int daemon_sock = socket(AF_UNIX, SOCK_STREAM, 0);
   if (daemon_sock == -1) {
@@ -173,12 +181,12 @@ int main() {
             if (path && strcmp(path, wallpath) != 0) {
               snprintf(wallpath, sizeof(wallpath), "%s",path);
               GLuint nexTex = loadImageIntoGPU(wallpath, &gl.img_w, &gl.img_h, gl.textureId);
+              cache_wallpaper(wallpath);
               if (gl.textureId != nexTex) {
                 if (gl.textureId != 0) {
                   glDeleteTextures(1, &gl.textureId);
                 }
                 gl.textureId = nexTex;
-                cache_wallpaper(wallpath);
               }
               gl_draw(&wl, &gl);
             }
@@ -190,9 +198,9 @@ int main() {
       wl_display_cancel_read(wl.display);
     }
     // render only if the focus is on wallpaper for cpu / gpu efficiency
-    if (wl.run) {
-      gl_draw(&wl, &gl);
-    }
+    // if (wl.run) {
+    //   gl_draw(&wl, &gl);
+    // }
   }
   close(daemon_sock);
   unlink(SOCK_PATH);
