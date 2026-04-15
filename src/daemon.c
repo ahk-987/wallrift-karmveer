@@ -37,12 +37,14 @@ double get_time(){
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return  ts.tv_sec + ts.tv_nsec * 1e-9;
 }
-// speed factor is inversely proportional to smoothness of parallax / panning movement
 
-// wallpaper width and height
-
-
-int setupDaemonSocket(int daemon_sock){
+int setupDaemonSocket(){
+  int daemon_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (daemon_sock == -1) {
+    perror("Socket\n");
+    return -1;
+  }
+  
   struct sockaddr_un d_addr = {0};
   d_addr.sun_family = AF_UNIX;
   strncpy(d_addr.sun_path, SOCK_PATH, sizeof(d_addr.sun_path) - 1);
@@ -52,7 +54,7 @@ int setupDaemonSocket(int daemon_sock){
   if (bind(daemon_sock, (struct sockaddr*)&d_addr, sizeof(d_addr)) == -1) {
     fprintf(stderr,"[ERR][SOCK]: Failed to bind socket!");
     close(daemon_sock);
-    return 1;
+    return -1;
   }
 
   printf("[INFO]: Socket created\n");
@@ -60,9 +62,53 @@ int setupDaemonSocket(int daemon_sock){
   printf("[INFO]: Listening...\n\n");
   int flags = fcntl(daemon_sock, F_GETFL, 0);
   fcntl(daemon_sock, F_SETFL, flags | O_NONBLOCK);
-  return 0;
+  return daemon_sock;
 }
 
+void handleClient(int daemon_sock, char *wallpath, size_t wallSize, APP *app){
+  int client = accept(daemon_sock, NULL, NULL);
+  if (client != -1) {
+    char buff[1024];
+    int n = read(client, buff, sizeof(buff)-1);
+    close(client);
+    if (n > 0) {
+      buff[n] = '\0';
+      char *path = NULL;
+      char *tok = strtok(buff, " ");
+
+      while (tok) {
+        if (strcmp(tok, "img") == 0) {
+          tok = strtok(NULL, " ");
+          if (tok) {
+            path = tok;
+          }
+        }
+        else if (strcmp(tok, "speed") == 0) {
+           tok = strtok(NULL, " ");
+           if (tok) {
+             app->gl->speed = strtof(tok, NULL);
+             if (app->gl->speed <= 0.00) app->gl->speed = 0.00f;
+             if (app->gl->speed >= 1.00) app->gl->speed = 1.00f;
+           }
+        }
+        tok = strtok(NULL, " ");
+      }
+
+      if (path && strcmp(path, wallpath) != 0) {
+        snprintf(wallpath, wallSize, "%s",path);
+        GLuint nexTex = loadImageIntoGPU(wallpath, &app->gl->img_w, &app->gl->img_h, app->gl->textureId);
+        cache_wallpaper(wallpath);
+        if (app->gl->textureId != nexTex) {
+          if (app->gl->textureId != 0) {
+            glDeleteTextures(1, &app->gl->textureId);
+          }
+          app->gl->textureId = nexTex;
+        }
+        gl_draw(app->wl, app->gl);
+      }
+    }
+  }
+}
 
 int main() {
 
@@ -105,15 +151,14 @@ int main() {
     return 1;
   }
   
-  gl_draw(&wl, &gl);
+  // drawing once to render cached wallpaper
+  gl_draw(&wl, &gl); 
+
   // unix socket
-  int daemon_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+
+  int daemon_sock = setupDaemonSocket();
   if (daemon_sock == -1) {
-    perror("Socket\n");
-    return 1;
-  }
-  
-  if (setupDaemonSocket(daemon_sock)) {
+    fprintf(stderr, "[ERR][SOCK]: %s\n","Failed to setup daemon socket");
     return 1;
   }
 
@@ -150,57 +195,12 @@ int main() {
       
       // socket event happend
       if (fds[1].revents & POLLIN) {
-        int client = accept(daemon_sock, NULL, NULL);
-        if (client != -1) {
-          char buff[1024];
-          int n = read(client, buff, sizeof(buff)-1);
-          close(client);
-          if (n > 0) {
-            buff[n] = '\0';
-            char *path = NULL;
-            char *tok = strtok(buff, " ");
-
-            while (tok) {
-              if (strcmp(tok, "img") == 0) {
-                tok = strtok(NULL, " ");
-                if (tok) {
-                  path = tok;
-                }
-              }
-              else if (strcmp(tok, "speed") == 0) {
-                 tok = strtok(NULL, " ");
-                 if (tok) {
-                   gl.speed = strtof(tok, NULL);
-                   if (gl.speed <= 0.00) gl.speed = 0.00f;
-                   if (gl.speed >= 1.00) gl.speed = 1.00f;
-                 }
-              }
-              tok = strtok(NULL, " ");
-            }
-
-            if (path && strcmp(path, wallpath) != 0) {
-              snprintf(wallpath, sizeof(wallpath), "%s",path);
-              GLuint nexTex = loadImageIntoGPU(wallpath, &gl.img_w, &gl.img_h, gl.textureId);
-              cache_wallpaper(wallpath);
-              if (gl.textureId != nexTex) {
-                if (gl.textureId != 0) {
-                  glDeleteTextures(1, &gl.textureId);
-                }
-                gl.textureId = nexTex;
-              }
-              gl_draw(&wl, &gl);
-            }
-          }
-        }
+        handleClient(daemon_sock, wallpath, sizeof(wallpath), &app);
       }
     }
     if (!did_read) {
       wl_display_cancel_read(wl.display);
     }
-    // render only if the focus is on wallpaper for cpu / gpu efficiency
-    // if (wl.run) {
-    //   gl_draw(&wl, &gl);
-    // }
   }
   close(daemon_sock);
   unlink(SOCK_PATH);
