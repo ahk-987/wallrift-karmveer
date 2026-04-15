@@ -1,4 +1,14 @@
 #include "../include/wayland.h"
+#include "../include/gl.h"
+#include <stdio.h>
+#include <wayland-client-protocol.h>
+#include <wayland-cursor.h>
+#include "../include/app.h"
+
+static const struct wl_callback_listener frame_listener = {
+  .done = frame_done 
+};
+
 
 static void registry_handler(void *data, struct wl_registry *registry,
                              uint32_t id, const char *interface,
@@ -49,41 +59,53 @@ static const struct zwlr_layer_surface_v1_listener layer_listener= {
 
 // pointer stuff
 static void pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time, wl_fixed_t sx, wl_fixed_t sy){
-  WL *wl = (WL*)data;
-  wl->target_cursor = wl_fixed_to_double(sx);
+  APP *app = (APP *)data;
+  app->wl->target_cursor = wl_fixed_to_double(sx);
 
-  float normalized = wl->target_cursor / wl->width;
+  float normalized = app->wl->target_cursor / app->wl->width;
   if (normalized < 0.0f) normalized = 0.0f;
   if (normalized > 1.0f) normalized = 1.0f;
-  wl->target_cursor = normalized;
+  app->wl->target_cursor = normalized;
 }
 static void pointer_enter(void *data, struct wl_pointer *pointer,
                           uint32_t serial, struct wl_surface *surface,
                           wl_fixed_t sx, wl_fixed_t sy) {
 
-  WL *wl = (WL *)data;
-  wl->target_cursor = wl_fixed_to_double(sx);
+  APP *app = (APP *)data;
+  if (!app->wl->pending_frame) {
+      struct wl_callback *cb = wl_surface_frame(app->wl->surface);
+      wl_callback_add_listener(cb, &frame_listener, app);
+      app->wl->pending_frame = 1;
+      wl_surface_commit(app->wl->surface);
+  }
+  app->wl->target_cursor = wl_fixed_to_double(sx);
 
-  float normalized = wl->target_cursor / wl->width;
+  float normalized = app->wl->target_cursor / app->wl->width;
   if (normalized < 0.0f) normalized = 0.0f;
   if (normalized > 1.0f) normalized = 1.0f;
-  wl->target_cursor = normalized;
+  app->wl->target_cursor = normalized;
 
-  if (wl->cursor && wl->cursor_surface) {
-    struct wl_cursor_image *image = wl->cursor->images[0];
-    wl_pointer_set_cursor(pointer, serial, wl->cursor_surface, image->hotspot_x, image->hotspot_y);
-    wl_surface_attach(wl->cursor_surface, wl_cursor_image_get_buffer(image), 0, 0);
-    wl_surface_damage(wl->cursor_surface, 0, 0, image->width, image->height);
-    wl_surface_commit(wl->cursor_surface);
+  if (app->wl->cursor && app->wl->cursor_surface) {
+    struct wl_cursor_image *image = app->wl->cursor->images[0];
+    struct wl_buffer *buffer = wl_cursor_image_get_buffer(image);
+    if (!buffer) {
+      perror("wl buffer");
+      return ;
+    }
+    wl_pointer_set_cursor(pointer, serial, app->wl->cursor_surface, image->hotspot_x, image->hotspot_y);
+    wl_surface_attach(app->wl->cursor_surface, buffer, 0, 0);
+    wl_surface_damage(app->wl->cursor_surface, 0, 0, image->width, image->height);
+    wl_surface_commit(app->wl->cursor_surface);
   }
-  wl->run = 1;
+  app->wl->run = 1;
 }
 
 static void pointer_leave(void *data, struct wl_pointer *pointer,
                           uint32_t serial, struct wl_surface *surface) {
-  WL *wl = (WL *)data;
 
-  wl->run = 0;
+  APP *app = (APP *)data;
+
+  app->wl->run = 0;
 }
 
 static void pointer_button(void *data, struct wl_pointer *pointer,
@@ -101,18 +123,21 @@ static const struct wl_pointer_listener pointer_listener = {
     pointer_axis,
 };
 
-//callback stuff
-
 static void frame_done(void *data, struct wl_callback *cb, uint32_t time){
-  wl_callback_destroy(cb);
-
   
+  wl_callback_destroy(cb);
+  
+  APP *app = (APP *)data;
+  app->wl->pending_frame = 0;
+
+  if (app->wl->run) {
+    gl_draw(app->wl, app->gl);
+    struct wl_callback *callback = wl_surface_frame(app->wl->surface); 
+    wl_callback_add_listener(callback, &frame_listener, app);
+    wl_surface_commit(app->wl->surface);
+    app->wl->pending_frame = 1;
+  }
 }
-
-static const struct wl_callback_listener frame_listener = {
-  .done = frame_done 
-
-};
 
 void setupWayland(WL *wl){
   wl->run = 1;
@@ -152,45 +177,46 @@ void setupCursor(WL *wl){
   }
 }
 
-void setupSurface(WL *wl){
+void setupSurface(APP *app){
 
   // getting surfaces and mouse pointer
-  wl->surface = wl_compositor_create_surface(wl->compositor);
-  wl->pointer = wl_seat_get_pointer(wl->seat);
-  wl_pointer_add_listener(wl->pointer, &pointer_listener, wl);
-
-  struct wl_callback *cb = wl_surface_frame(wl->surface);
-  wl_callback_add_listener(cb, &frame_listener, wl);
-
+  app->wl->surface = wl_compositor_create_surface(app->wl->compositor);
+  app->wl->pointer = wl_seat_get_pointer(app->wl->seat);
+  wl_pointer_add_listener(app->wl->pointer, &pointer_listener, app);
 
   // getting layer shell surface
-  wl->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-      wl->layer_shell, wl->surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
+  app->wl->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+      app->wl->layer_shell, app->wl->surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
       "wallpaper");
 
   // setting anchors for the surface
-  zwlr_layer_surface_v1_set_anchor(wl->layer_surface,
+  zwlr_layer_surface_v1_set_anchor(app->wl->layer_surface,
                                    ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                                    ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
                                    ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
                                    ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
 
-  zwlr_layer_surface_v1_set_size(wl->layer_surface, 0, 0);
+  zwlr_layer_surface_v1_set_size(app->wl->layer_surface, 0, 0);
   // trying to bypass all the exclusive zones
-  zwlr_layer_surface_v1_set_exclusive_zone(wl->layer_surface, -1);
+  zwlr_layer_surface_v1_set_exclusive_zone(app->wl->layer_surface, -1);
 
   // adding layer shell surface listener to layer shell surface
-  zwlr_layer_surface_v1_add_listener(wl->layer_surface, &layer_listener, wl);
+  zwlr_layer_surface_v1_add_listener(app->wl->layer_surface, &layer_listener, app->wl);
 
   // commiting the surface
-  wl_surface_commit(wl->surface);
+  wl_surface_commit(app->wl->surface);
 
-  while (!wl->configured) {
-    wl_display_dispatch(wl->display);
+  while (!app->wl->configured) {
+    wl_display_dispatch(app->wl->display);
   }
 
-  printf("\n\n%s %d\n", "[INFO]: Display Width = ", wl->width);
-  printf("%s %d\n\n", "[INFO]: Display Height = ", wl->height);
+  struct wl_callback *cb = wl_surface_frame(app->wl->surface);
+  wl_callback_add_listener(cb, &frame_listener, app);
+  wl_surface_commit(app->wl->surface);
+  app->wl->pending_frame  = 1;
+
+  printf("\n\n%s %d\n", "[INFO]: Display Width = ", app->wl->width);
+  printf("%s %d\n\n", "[INFO]: Display Height = ", app->wl->height);
 }
 
 void setupEGL(WL *wl){

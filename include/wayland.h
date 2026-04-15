@@ -13,8 +13,9 @@
 #include <string.h>
 #include <wayland-util.h>
 #include <wayland-cursor.h>
+#include "../include/app.h"
 
-typedef struct {
+typedef struct WL{
 
   struct wl_display *display;
   struct wl_compositor *compositor;
@@ -36,7 +37,7 @@ typedef struct {
 
   double target_cursor;
   double cursor_x;
-  int configured, width, height , wayland_fd;
+  int configured, pending_frame, width, height, wayland_fd;
   unsigned int run;
 
 } WL;
@@ -79,6 +80,6 @@ void setupWayland(WL *wl);
 
 void setupCursor(WL *wl);
 
-void setupSurface(WL *wl);
+void setupSurface(APP *app);
 
 void setupEGL(WL *wl);
