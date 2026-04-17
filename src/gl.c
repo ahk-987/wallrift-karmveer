@@ -1,5 +1,10 @@
-#include "../include/gl.h"
-
+#include "gl.h"
+#include "monitor.h"
+#include "wayland.h"
+#include "file.h"
+#include "app.h"
+#include <GLES2/gl2.h>
+#include <stdio.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "../include/stb_image.h"
 
@@ -44,6 +49,8 @@ GLuint createProgram(const char *vFilePath, const char *fFilePath) {
   }
   GLuint vs = createShader(GL_VERTEX_SHADER, vsrc);
   GLuint fs = createShader(GL_FRAGMENT_SHADER, fsrc);
+  int success;
+  char infoLog[512];
 
   if (vs == -1 || fs == -1) {
     fprintf(stderr,"[ERR][SHADER]: %s\n", "Failed to create shader.");
@@ -52,6 +59,11 @@ GLuint createProgram(const char *vFilePath, const char *fFilePath) {
     return -1;
   }
   GLuint prog = glCreateProgram();
+  glGetProgramiv(prog, GL_PROGRAM, &success);
+  if (!success) {
+    glGetProgramInfoLog(prog, 512, NULL, infoLog);
+    fprintf(stderr,"[ERR][PROGRAM] :%s\n", infoLog);
+  }
   glAttachShader(prog, vs);
   glAttachShader(prog, fs);
   glLinkProgram(prog);
@@ -59,8 +71,7 @@ GLuint createProgram(const char *vFilePath, const char *fFilePath) {
   free((void *)vsrc);
   free((void *)fsrc);
 
-  int success;
-  char infoLog[512];
+ 
   glGetProgramiv(prog, GL_LINK_STATUS, &success);
   if (!success) {
     glGetProgramInfoLog(prog, 512, NULL, infoLog);
@@ -97,65 +108,83 @@ GLuint loadImageIntoGPU(char *imgPath, int *imageWidth, int* imageHeight, GLuint
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
   stbi_image_free(pixels);
-  printf("[INFO]: Image loaded in GPU\n");
+  printf("[INFO]: %s loaded in GPU\n",expanded);
   printf("[INFO]: Img width = %d\n[INFO]: Img height = %d\n\n", *imageWidth, *imageHeight);
   return texID;
 }
 
-void gl_draw(WL *wl, GL *gl){
-    
-    glViewport(0, 0, wl->width, wl->height);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glUseProgram(gl->prog);
+void gl_draw(APP *app, Monitor *m){
 
+    if (!eglMakeCurrent(app->egl.egl_display, m->egl_surface, m->egl_surface, app->egl.egl_context)) {
+      fprintf(stderr,"\n[ERR][EGL]: eglMakeCurrent failed\n");
+    }
+
+    glViewport(0, 0, m->width, m->height);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(app->gl.prog);
+    if (app->gl.prog == 0) {
+      printf("program failed\n");
+    }
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, gl->textureId);
-    glUniform1i(gl->texLoc, 0);
+    glBindTexture(GL_TEXTURE_2D, m->textureId);
+    glUniform1i(app->gl.texLoc, 0);
 
     // update mouse constatnly for parallax
-    wl->cursor_x += (wl->target_cursor - wl->cursor_x) * gl->speed;
-    glUniform1f(gl->cursorLoc, wl->cursor_x);
-    glUniform1f(gl->imgWLoc, (float)gl->img_w);
-    glUniform1f(gl->viewWLoc, (float)wl->width);
-    glUniform1f(gl->imgHLoc, (float)gl->img_h);
-    glUniform1f(gl->viewHLoc, (float)wl->height);
+    m->cursor_x += (m->target_cursor - m->cursor_x) * app->gl.speed;
+    printf("cursor :%f\n",m->cursor_x);
+
+    glUniform1f(app->gl.cursorLoc, m->cursor_x);
+    glUniform1f(app->gl.imgWLoc, (float)m->img_w);
+    glUniform1f(app->gl.viewWLoc, (float)m->width);
+    glUniform1f(app->gl.imgHLoc, (float)m->img_h);
+    glUniform1f(app->gl.viewHLoc, (float)m->height);
 
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-    eglSwapBuffers(wl->egl_display, wl->egl_surface);
-
+    eglSwapBuffers(app->egl.egl_display, m->egl_surface);
 }
 
-int setupOpenGL(WL *wl, GL *gl){
+int setupOpenGL(APP *app){
+ 
 
-  if ((gl->prog =
+  if ((app->gl.prog =
       createProgram("/usr/share/wallrift/shaders/wallpaper.vert",
                     "/usr/share/wallrift/shaders/wallpaper.frag")) == -1) {
-    
+
     fprintf(stderr,"\n[ERR][GL]: Failed to create program.\n");
     return 1;
   }
-  gl->cursorLoc = glGetUniformLocation(gl->prog, "u_cursor");
-  gl->imgWLoc = glGetUniformLocation(gl->prog, "u_img_width");
-  gl->imgHLoc = glGetUniformLocation(gl->prog, "u_img_height");
-  gl->viewWLoc = glGetUniformLocation(gl->prog, "u_view_width");
-  gl->viewHLoc = glGetUniformLocation(gl->prog, "u_view_height");
+  printf("program created %d\n",app->gl.prog);
+  //
+  // if ((gl->prog =
+  //     createProgram("/home/karmveer/.coding/wallrift/shaders/wallpaper.vert",
+  //                   "/home/karmveer/.coding/wallrift/shaders/wallpaper.frag")) == -1) {
+  //
+  //   fprintf(stderr,"\n[ERR][GL]: Failed to create program.\n");
+  //   return 1;
+  // }
+  app->gl.cursorLoc = glGetUniformLocation(app->gl.prog, "u_cursor");
+  app->gl.imgWLoc = glGetUniformLocation(app->gl.prog, "u_img_width");
+  app->gl.imgHLoc = glGetUniformLocation(app->gl.prog, "u_img_height");
+  app->gl.viewWLoc = glGetUniformLocation(app->gl.prog, "u_view_width");
+  app->gl.viewHLoc = glGetUniformLocation(app->gl.prog, "u_view_height");
   
-  glUseProgram(gl->prog);
-  glGenBuffers(1, &gl->vbo);
-  glGenBuffers(1, &gl->ebo);
-
-  glBindBuffer(GL_ARRAY_BUFFER, gl->vbo);
+  glUseProgram(app->gl.prog);
+  glGenBuffers(1, &app->gl.vbo);
+  glGenBuffers(1, &app->gl.ebo);
+  
+  glBindBuffer(GL_ARRAY_BUFFER, app->gl.vbo);
   glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gl->ebo);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, app->gl.ebo);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
   glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
   glEnableVertexAttribArray(0);
 
-  int resLoc = glGetUniformLocation(gl->prog, "resolution");
-  glUniform2f(resLoc, wl->width, wl->height);
-  int imgLoc = glGetUniformLocation(gl->prog, "imgSize");
-  glUniform2f(imgLoc, gl->img_w, gl->img_h);
+  int resLoc = glGetUniformLocation(app->gl.prog, "resolution");
+  glUniform2f(resLoc, app->active_monitor->width, app->active_monitor->height);
+  int imgLoc = glGetUniformLocation(app->gl.prog, "imgSize");
+  glUniform2f(imgLoc, app->active_monitor->img_w, app->active_monitor->img_h);
   return 0;
 }

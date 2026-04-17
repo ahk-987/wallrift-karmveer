@@ -1,16 +1,15 @@
 #pragma once
 
+#include "monitor.h"
 #include <GL/gl.h>
 #include <GLES2/gl2.h>
-#include "wayland.h"
-#include "file.h"
 
+typedef struct APP APP;
 typedef struct GL{
   GLuint prog;
   GLuint vbo;
   GLuint vao;
   GLuint ebo;
-  GLuint textureId;
 
   int cursorLoc;
   int imgWLoc;
@@ -18,15 +17,16 @@ typedef struct GL{
   int viewWLoc;
   int viewHLoc;
   int texLoc;
-  int img_w;
-  int img_h;
+
   float speed;
 } GL;
+
+
 
 GLuint createShader(GLenum type, const char *shaderSrc); 
 
 GLuint createProgram(const char *vFilePath, const char *fFilePath); 
 GLuint loadImageIntoGPU(char *imgPath, int *imageWidth, int* imageHeight, GLuint texID); 
 
-void gl_draw(WL *wl, GL *gl);
-int setupOpenGL(WL *wl, GL *gl);
+void gl_draw(APP *app , Monitor *m);
+int setupOpenGL(APP *app);

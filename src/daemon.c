@@ -86,9 +86,9 @@ void handleClient(int daemon_sock, char *wallpath, size_t wallSize, APP *app){
         else if (strcmp(tok, "speed") == 0) {
            tok = strtok(NULL, " ");
            if (tok) {
-             app->gl->speed = strtof(tok, NULL);
-             if (app->gl->speed <= 0.00) app->gl->speed = 0.00f;
-             if (app->gl->speed >= 1.00) app->gl->speed = 1.00f;
+             app->gl.speed = strtof(tok, NULL);
+             if (app->gl.speed <= 0.00) app->gl.speed = 0.00f;
+             if (app->gl.speed >= 1.00) app->gl.speed = 1.00f;
            }
         }
         tok = strtok(NULL, " ");
@@ -96,15 +96,15 @@ void handleClient(int daemon_sock, char *wallpath, size_t wallSize, APP *app){
 
       if (path && strcmp(path, wallpath) != 0) {
         snprintf(wallpath, wallSize, "%s",path);
-        GLuint nexTex = loadImageIntoGPU(wallpath, &app->gl->img_w, &app->gl->img_h, app->gl->textureId);
+        GLuint nexTex = loadImageIntoGPU(wallpath, &app->active_monitor->img_w, &app->active_monitor->img_h, app->active_monitor->textureId);
         cache_wallpaper(wallpath);
-        if (app->gl->textureId != nexTex) {
-          if (app->gl->textureId != 0) {
-            glDeleteTextures(1, &app->gl->textureId);
+        if (app->active_monitor->textureId != nexTex) {
+          if (app->active_monitor->textureId != 0) {
+            glDeleteTextures(1, &app->active_monitor->textureId);
           }
-          app->gl->textureId = nexTex;
+          app->active_monitor->textureId = nexTex;
         }
-        gl_draw(app->wl, app->gl);
+        gl_draw(app, app->active_monitor);
       }
     }
   }
@@ -121,38 +121,42 @@ int main() {
     wallpath[0] = '\0';
   }
 
-  WL wl = {0};
-  GL gl = {0};
   
-  APP app = {
-    .wl = &wl,
-    .gl = &gl
-  };
+  APP *app = calloc(1, sizeof(APP));
 
-  gl.speed = 0.05f;
-  gl.img_w = 0;
-  gl.img_h = 0;
-  setupWayland(&wl);
-  setupCursor(&wl);
-  setupSurface(&app);
-  setupEGL(&wl);
+  WLGlobal wl;
+  GL gl;
+
+  app->wl = wl;
+  app->gl = gl;
+
+  setupWayland(app);
+  setupCursor(app);
+
+  setupSurface(app, app->active_monitor);
+  setupEGLGlobal(app);
+
+  for (int i = 0; i < app->monitor_count; i++) {
+    setupEGL(app, &app->monitors[i]);
+    printf("setup done for monitor %d id %d\n",i,app->monitors[i].global_name);
+  }
   
   // openGL stuff
-  gl.textureId = 0;
-  gl.texLoc = glGetUniformLocation(gl.prog, "tex");
+  app->active_monitor->textureId = 0;
+  app->gl.texLoc = glGetUniformLocation(app->gl.prog, "tex");
 
   // load the cached wallpaper
   if (wallpath[0] != '\0') {
-     gl.textureId = loadImageIntoGPU(wallpath, &gl.img_w , &gl.img_h, gl.textureId);
+     app->active_monitor->textureId = loadImageIntoGPU(wallpath, &app->active_monitor->img_w , &app->active_monitor->img_h, app->active_monitor->textureId);
      cache_wallpaper(wallpath);
   }
 
-  if (setupOpenGL(&wl, &gl)) {
+  if (setupOpenGL(app)) {
     return 1;
   }
   
   // drawing once to render cached wallpaper
-  gl_draw(&wl, &gl); 
+  gl_draw(app, app->active_monitor); 
 
   // unix socket
 
@@ -163,9 +167,9 @@ int main() {
   }
 
   // getting stuff ready for polling
-  wl.wayland_fd = wl_display_get_fd(wl.display);
+  app->wl.wayland_fd = wl_display_get_fd(app->wl.display);
   struct pollfd fds[2];
-  fds[0].fd = wl.wayland_fd;
+  fds[0].fd = app->wl.wayland_fd;
   fds[0].events = POLLIN;
 
   fds[1].fd = daemon_sock;
@@ -173,33 +177,34 @@ int main() {
   int did_read = 0;
   
   // render loop
+  //
   while (1) {
 
     did_read = 0;
-    wl_display_dispatch_pending(wl.display);
+    wl_display_dispatch_pending(app->wl.display);
 
-    if (wl_display_prepare_read(wl.display) != 0) {
-      wl_display_dispatch_pending(wl.display);
+    if (wl_display_prepare_read(app->wl.display) != 0) {
+      wl_display_dispatch_pending(app->wl.display);
       continue;
     }
-    wl_display_flush(wl.display);
-    int timeout = wl.run ? 0 : -1;
+    wl_display_flush(app->wl.display);
+    int timeout = app->active_monitor->pointer_inside ? 0 : -1;
     int ret = poll(fds, 2, timeout);
 
     if (ret > 0) {
       // wayland event happend
       if (fds[0].revents & POLLIN) {
-        wl_display_read_events(wl.display);
+        wl_display_read_events(app->wl.display);
         did_read = 1;
       }
       
       // socket event happend
       if (fds[1].revents & POLLIN) {
-        handleClient(daemon_sock, wallpath, sizeof(wallpath), &app);
+        handleClient(daemon_sock, wallpath, sizeof(wallpath), app);
       }
     }
     if (!did_read) {
-      wl_display_cancel_read(wl.display);
+      wl_display_cancel_read(app->wl.display);
     }
   }
   close(daemon_sock);
