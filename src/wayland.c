@@ -268,8 +268,10 @@ static const struct wl_pointer_listener pointer_listener = {
 static void frame_done(void *data, struct wl_callback *cb, uint32_t time){
   
   (void)time;
+
   wl_callback_destroy(cb);
   Monitor *m = (Monitor *)data;
+  m->frame_cb = NULL;
   m->pending_frame = 0;
 
   if (!m->surface || !m->egl_surface) {
