@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
     printHelp();
     return 1;
   }
-  
+
   for (int i = 1; i < argc; i++) {
     if (strcmp("img", argv[i]) == 0 && (i + 1) <= argc) {
       wallpath = argv[++i];
@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
       break;
     }
   }
-  
+
   if (!wallpath) {
     printHelp();
   }
@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
 
   struct sockaddr_un addr = {0};
   addr.sun_family = AF_UNIX;
-  
+
   strncpy(addr.sun_path, SOCK_PATH, sizeof(addr.sun_path) - 1); 
 
   if (connect(sock_fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
