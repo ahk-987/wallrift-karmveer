@@ -162,7 +162,7 @@ static void on_idle(void *data, struct ext_idle_notification_v1 *notif){
   (void)notif;
   APP *app = (APP *)data;
   app->wl.cursor_moved = 0;
-  printf("Stale cursor\n");
+  LOG_INFO("WL", "Stale cursor");
 
 };
 
@@ -171,7 +171,7 @@ static void on_resume(void *data, struct ext_idle_notification_v1 *notif){
   APP *app = (APP *)data;
   Monitor *m = app->active_monitor;
   app->wl.cursor_moved = 1;
-  printf("resumed\n");
+  LOG_INFO("WL", "cursor moved");
 
   if (!m->pending_frame) {
       m->frame_cb = wl_surface_frame(m->surface);
@@ -320,7 +320,6 @@ static void frame_done(void *data, struct wl_callback *cb, uint32_t time){
     return;
   }
   if (m->app->wl.cursor_moved == 0) {
-    printf("skip render\n");
     return;
   }
 

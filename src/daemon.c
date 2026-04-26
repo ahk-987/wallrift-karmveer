@@ -114,7 +114,7 @@ void handle_client(int daemon_sock, APP *app){
       if (path) {
         Monitor *m = app->active_monitor;
         if (!m){
-          LOG_WARN("DAEMON", "No active monitor");
+          LOG_WARN("WL", "No active monitor");
           return;
         } 
         if (strcmp(path, m->wallpath) == 0) return; 
@@ -145,7 +145,7 @@ int main(void) {
   for (int i = 0; i < app->monitor_count; i++) {
     setupSurface(app, &app->monitors[i]);
     setupEGL(app, &app->monitors[i]);
-    LOG_INFO("DAEMON", "Setup done for monitor %d with id: %d",i,app->monitors[i].global_name);
+    LOG_INFO("EGL", "Setup done for monitor %d with id: %d",i,app->monitors[i].global_name);
   }
 
   /* making context current before opengGL setup
@@ -160,7 +160,7 @@ int main(void) {
   
   // setting up OpenGL
   if (setupOpenGL(app)) {
-    LOG_ERR("DAEMON","Failed to setup opengGL");
+    LOG_ERR("GL","Failed to setup opengGL");
     return 1;
   }
   
