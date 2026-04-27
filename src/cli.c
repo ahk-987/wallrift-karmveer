@@ -2,6 +2,7 @@
 /// @author : github.com/its-19818942118 @contributes: wallrift-cli
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/un.h>
@@ -19,18 +20,28 @@ enum State {
     eFalse ,
 };
 
+struct Command{
+  enum State img_s;
+  enum State speed_s;
+  enum State query_s;
+  
+  const char* path;
+  float speed;
+};
+
 void printHelp(){
-  printf("\033[1mwallrift - A smooth parllax supported wallpaper engine\033[0m.\n\n");
+  printf("\033[1mwallrift - A smooth parallax supported wallpaper engine\033[0m.\n\n");
   printf("\033[1m\033[4mUsage\033[0m: \033[1mwallrift <COMMAND>\033[0m\n\n");
   printf("\033[1m\033[04mCommands:\033[0m \n\n");
   printf("  \033[1mimg\033[0m      sends the path of the wallpaper to the daemon.\n");
-  printf("  \033[1mspeed\033[0m    sets the speed for parllax. Lower speed = smooth interpolation.\n");
+  printf("  \033[1mspeed\033[0m    sets the speed for parallax. Lower speed = smooth interpolation.\n");
+  printf("  \033[1mquery\033[0m    prints the current applied wallpaper.\n");
 
-  printf("\033[1m\033[04mOptions:\033[0m \n\n");
+  printf("\033[1m\033[04m\nOptions:\033[0m \n\n");
   printf("  \033[1m-h,--help\033[0m     prints this help message.\n");
 }
 
-int handleSocket(char const* restrict wallpath , float const speed, enum State stateImgF , enum State stateSpeedF) {
+int handleSocket(struct Command command) {
     int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
     if (sock_fd == -1) {
@@ -41,34 +52,60 @@ int handleSocket(char const* restrict wallpath , float const speed, enum State s
     struct sockaddr_un addr = {0};
     addr.sun_family = AF_UNIX;
     
-    strncpy(addr.sun_path, SOCK_PATH, sizeof(addr.sun_path) - 1); 
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", SOCK_PATH);
   
     if (connect(sock_fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
       perror("Connection to socket failed!\n");
+      fprintf(stderr, "Is wallrift-daemon running ?\n");
+      close(sock_fd);
       return EXIT_FAILURE;
     }
   
-    char cmd[1024];
+    char cmd[1024] = {0};
     
-    // commented out cursed code of shame
-    // snprintf(cmd, sizeof(cmd), "img %s speed %f",wallpath,speed);
-    
-    if (stateSpeedF == eTrue) {
-        snprintf(cmd, sizeof(cmd), "speed %f", speed);
+    if (command.img_s == eTrue && command.speed_s == eTrue) {
+      int ret = snprintf(cmd, sizeof(cmd), "img %s speed %f", command.path, command.speed);
+
+      if (ret < 0 || ret >= (int)sizeof(cmd)) {
+          fprintf(stderr, "command too long\n");
+          close(sock_fd);
+          return EXIT_FAILURE;
+      }
     }
-    else if ( stateImgF == eTrue ) {
-        snprintf(cmd, sizeof(cmd), "img %s", wallpath);
+    else if (command.img_s == eTrue) {
+      int ret = snprintf(cmd, sizeof(cmd), "img %s", command.path);
+
+      if (ret < 0 || ret >= (int)sizeof(cmd)) {
+          fprintf(stderr, "command too long\n");
+          close(sock_fd);
+          return EXIT_FAILURE;
+      }
+    }
+    else if (command.speed_s == eTrue) {
+      snprintf(cmd, sizeof(cmd), "speed %f",command.speed);
+    }
+    else if (command.query_s == eTrue) {
+      snprintf(cmd, sizeof(cmd), "query");
     }
     
-    else {
-        snprintf(cmd, sizeof(cmd), "img %s speed %f", wallpath , speed);
-    }
-    
-    if (write(sock_fd, cmd, strlen(cmd)) == -1) {
-      perror("write to socket failed!\n");
+    if (cmd[0] == '\0') {
+      fprintf(stderr, "No valid command to send\n");
+      close(sock_fd);
       return EXIT_FAILURE;
     }
-  
+    size_t len = strlen(cmd);
+    size_t total = 0;
+
+    while (total < len) {
+        ssize_t n = write(sock_fd, cmd + total, len - total);
+        if (n == -1) {
+            perror("write to socket failed!\n");
+            close(sock_fd);
+            return EXIT_FAILURE;
+        }
+        total += n;
+    }
+ 
     close(sock_fd);
     return EXIT_SUCCESS;
     
@@ -87,7 +124,7 @@ int validateFloat(char const* restrict string, float* outValue) {
     // 1. Check if any conversion happened (string != endptr)
     // 2. Check if we reached the end of the string (*endptr == '\0')
     // 3. Check for overflow/underflow (errno == 0)
-    if (string != endptr && *endptr == '\0' && errno == 0) {
+    if (string != endptr && *endptr == '\0' && errno == 0 && isfinite(val)) {
         if (outValue) {
             *outValue = val;
         }
@@ -108,7 +145,7 @@ int validateImgPath(char const* restrict imgPath) {
         return EXIT_FAILURE;
     }
     
-    return 0;
+    return EXIT_SUCCESS;
 }
 
 int main(int argc, char *argv[]) {
@@ -118,74 +155,80 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     
-    float speed = {0.5f};
-    char const* wallpath = {NULL};
     
-    enum State stateImgF = eFalse;
-    enum State stateSpeedF = eFalse;
-    enum State stateQueryF = eFalse;
-    
+    struct Command command = {
+      .img_s = eFalse,
+      .speed_s = eFalse,
+      .query_s = eFalse,
+      .path = NULL,
+      .speed = 0.05f
+    };
+
     for (size_t argsItr = {1}; argsItr < argc; ++argsItr) {
-        #define TEST_NEXT_ARGUMENT argc > ( argsItr + 1 ) // tests for more arguments
-        #define CMP_ARGUMENT(...) strcmp(argument, __VA_ARGS__) == EXIT_SUCCESS
         
         char* argument = argv[argsItr];
         
-        if (CMP_ARGUMENT("-h") || CMP_ARGUMENT("--help")) {
+        if (strcmp(argument, "-h") == 0 || strcmp(argument, "--help") == 0) {
             printHelp();
             return EXIT_SUCCESS;
         }
         
-        else if (CMP_ARGUMENT("img")) {
-            if (stateImgF == eTrue) {
-                printf("ignoring duplicate request: 'img'\n");
+        else if (strcmp(argument, "img") == 0) {
+            if (command.img_s == eTrue) {
+                fprintf(stderr,"ignoring duplicate request: 'img'\n");
             }
-            else if (TEST_NEXT_ARGUMENT && validateImgPath(argv[++argsItr]) == EXIT_SUCCESS) {
-                stateImgF = eTrue;
-                wallpath = argv[argsItr];
-                printf("received request: 'img'\n");
+            else if ((argsItr + 1 < argc) && validateImgPath(argv[argsItr + 1]) == EXIT_SUCCESS) {
+                command.img_s = eTrue;
+                command.path = argv[++argsItr];
             }
             else {
-                stateImgF = eError;
-                printf("invalid argument for 'img'. expected valid path!\n");
+                command.img_s = eError;
+                fprintf(stderr,"invalid argument for 'img'. expected valid path!\n");
             }
         }
         
-        else if (CMP_ARGUMENT("speed")) {
-            if (stateSpeedF == eTrue) {
-                printf("ignoring duplicate request: 'speed'\n");
+        else if (strcmp(argument, "speed") == 0) {
+            if (command.speed_s == eTrue) {
+                fprintf(stderr,"ignoring duplicate request: 'speed'\n");
             }
-            else if (TEST_NEXT_ARGUMENT && validateFloat(argv[++argsItr], &speed) == EXIT_SUCCESS) {
-                stateSpeedF = eTrue;
-                printf("received request: 'speed' (%.2f)\n", speed);
+            else if ((argsItr + 1 < argc) && validateFloat(argv[argsItr + 1], &command.speed) == EXIT_SUCCESS) {
+                command.speed_s = eTrue;
+                argsItr++;
             }
             else {
-                stateSpeedF = eError;
-                printf("invalid argument for 'speed'. expected a float!\n");
+                command.speed_s = eError;
+                fprintf(stderr,"invalid argument for 'speed'. expected a float!\n");
             }
         }
         
-        else if (CMP_ARGUMENT("query")) {
-            if (stateQueryF == eTrue) {
+        else if (strcmp(argument, "query") == 0) {
+            if (command.query_s == eTrue) {
                 printf("ignoring duplicate request: 'query'\n");
             }
             else {
-                stateQueryF = eTrue;
-                printf("recived request: 'query'\n");
+                command.query_s = eTrue;
             }
         }
         
         else {
-            printf("invalid request recived: '%s'. please provide a valid request! try -h or --help for information\n" , argument);
+            fprintf(stderr,"invalid request recieved: '%s'. please provide a valid request! try -h or --help for information\n" , argument);
             return EXIT_FAILURE;
         }
     }
     
-    if ( stateImgF == eError || stateSpeedF == eError ) {
-        printf("Exiting due to errors!");
+    if ( command.img_s == eError || command.speed_s == eError ) {
+        fprintf(stderr,"Exiting due to errors!");
         return EXIT_FAILURE;
     }
-    
-    handleSocket(wallpath, speed , stateImgF , stateSpeedF);
-    
+
+    if (command.query_s == eTrue && (command.img_s == eTrue || command.speed_s == eTrue)) {
+      fprintf(stderr, "query cannot be combined with other commands\n");
+      return EXIT_FAILURE;
+    }
+
+    if (handleSocket(command)) {
+      fprintf(stderr, "command failed\n");
+      return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
 }
