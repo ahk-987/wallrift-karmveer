@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include "file.h"
 
 #define SOCK_PATH "/tmp/wallrift.sock"
 
@@ -85,7 +86,10 @@ int handleSocket(struct Command command) {
       snprintf(cmd, sizeof(cmd), "speed %f",command.speed);
     }
     else if (command.query_s == eTrue) {
-      snprintf(cmd, sizeof(cmd), "query");
+      const char * currentWall = get_cached_wallpaper();
+      fprintf(stdout, "current wallpaper : %s\n",  currentWall);
+      close(sock_fd);
+      return EXIT_SUCCESS;
     }
     
     if (cmd[0] == '\0') {
@@ -226,7 +230,7 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
 
-    if (handleSocket(command)) {
+    if (handleSocket(command) == EXIT_FAILURE) {
       fprintf(stderr, "command failed\n");
       return EXIT_FAILURE;
     }
