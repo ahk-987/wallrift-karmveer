@@ -75,5 +75,6 @@ endif()
 # CLI — no GPU deps needed
 add_executable(wallrift
     src/cli.c
+    src/file.c
 )
 target_include_directories(wallrift PRIVATE include)
